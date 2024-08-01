@@ -1,6 +1,6 @@
 # Repository Overview
 
-This repository contains all the code and data used in the paper "Title of the Paper". It includes scripts for data processing, analysis, and visualization, as well as the raw and processed datasets. Detailed instructions for replicating the study's results and running the code are provided in the documentation. For any questions or issues, please refer to the contact information included in this repository.
+This repository contains all the code and data used in the paper "Probabilistic Inversion Modeling of Gas Emissions: A Gradient-Based MCMC Estimation of Gaussian Plume Parameters". It includes scripts for data processing, analysis, and visualization, as well as the raw and processed datasets. Detailed instructions for replicating the study's results and running the code are provided in the documentation. For any questions or issues, please refer to the contact information included in this repository.
 
 The package "sourceinversion" needs to be installed before running the notebooks. This can downloaded from PyPI using the following command:
 
