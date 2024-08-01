@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "sourceinversion"
+version = "0.1.0"
+description = "A Gaussian plume model simulator and gas emission source inversion package."
+authors = ["NewmanTHP <t.newman1@lancaster.ac.uk>"]
+license = "Apache-2.0"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "3.10.12"
+numpy = "1.26.2"
+jax = "0.4.13"
+jaxtyping = "0.2.15"
+matplotlib = "3.7.2"
+seaborn = "0.12.2"
+pandas = "1.5.3"
+scipy = "1.11.3"
+tensorflow-probability = "0.20.1"
+jaxlib = "0.4.13"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
