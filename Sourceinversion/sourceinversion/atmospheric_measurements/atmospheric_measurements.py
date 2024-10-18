@@ -444,7 +444,7 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
     
 
 
-    def structure_to_vectorise(self, sensor_x, sensor_y, sensor_z, number_of_time_steps = None):
+    def structure_to_vectorise(self, sensor_x, sensor_y, sensor_z = None, number_of_time_steps = None):
         """
         Vectorizes the spatial grid used in grid-based inversion and creates vectors of temporal sensor locations.
         
@@ -462,22 +462,35 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
         """
 
         # Create a meshgrid of potential source locations from the Grid class.
-        meshedgrid = jnp.meshgrid(jnp.arange(self.grid.x_range[0], self.grid.x_range[1] + self.grid.dx, self.grid.dx) \
-                                , jnp.arange(self.grid.y_range[0], self.grid.y_range[1] + self.grid.dy, self.grid.dy))
-        sx, sy = meshedgrid[0], meshedgrid[1]
-
-        # Flatten the meshgrid to create a vector of potential source locations.
-        source_coord_grid = jnp.array([sx.flatten(), sy.flatten(), np.full(sx.size, self.source_location.source_location_z[0])]).T
+        if sensor_z is None:
+            meshedgrid = jnp.meshgrid(jnp.arange(self.grid.x_range[0], self.grid.x_range[1] + self.grid.dx, self.grid.dx) \
+                                    , jnp.arange(self.grid.y_range[0], self.grid.y_range[1] + self.grid.dy, self.grid.dy))
+            sx, sy = meshedgrid[0], meshedgrid[1]
+            # Flatten the meshgrid to create a vector of potential source locations.
+            source_coord_grid = jnp.array([sx.flatten(), sy.flatten(), np.full(sx.size, self.source_location.source_location_z[0])]).T
+        else:
+            meshedgrid = jnp.meshgrid(jnp.arange(self.grid.x_range[0], self.grid.x_range[1] + self.grid.dx, self.grid.dx) \
+                                    , jnp.arange(self.grid.y_range[0], self.grid.y_range[1] + self.grid.dy, self.grid.dy) \
+                                    , jnp.arange(self.grid.z_range[0], self.grid.z_range[1] + self.grid.dz, self.grid.dz))
+            sx, sy, sz = meshedgrid[0], meshedgrid[1], meshedgrid[2]
+            # Flatten the meshgrid to create a vector of potential source locations.
+            source_coord_grid = jnp.array([sx.flatten(), sy.flatten(), sz.flatten()]).T
 
         # Repeat the sensor locations for each time step.
         if number_of_time_steps is None:
             temporal_sensor_x = jnp.repeat(sensor_x, self.wind_field.number_of_time_steps)
             temporal_sensor_y = jnp.repeat(sensor_y, self.wind_field.number_of_time_steps)
-            temporal_sensor_z = jnp.repeat(sensor_z, self.wind_field.number_of_time_steps)
+            if sensor_z is None:
+                temporal_sensor_z = jnp.repeat(self.source_location.source_location_z[0], self.wind_field.number_of_time_steps)
+            else:
+                temporal_sensor_z = jnp.repeat(sensor_z, self.wind_field.number_of_time_steps)
         else:
             temporal_sensor_x = jnp.repeat(sensor_x, number_of_time_steps)
             temporal_sensor_y = jnp.repeat(sensor_y, number_of_time_steps)
-            temporal_sensor_z = jnp.repeat(sensor_z, number_of_time_steps)
+            if sensor_z is None:
+                temporal_sensor_z = jnp.repeat(self.source_location.source_location_z[0], number_of_time_steps)
+            else:
+                temporal_sensor_z = jnp.repeat(sensor_z, number_of_time_steps)
 
         return source_coord_grid, temporal_sensor_x, temporal_sensor_y, temporal_sensor_z
 
@@ -692,7 +705,8 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
         # Downwind distance, horizontal and vertical offsets.
         delta_R = self.downwind_distance(source, all_x, all_y, self.wind_field.initial_wind_direction)
         delta_horizontal = self.horizontal_offset(source, all_x, all_y, self.wind_field.initial_wind_direction)
-        delta_vertical = self.grid.z - self.source_location.source_location_z[source_nbr]
+        ground_level = 0.0
+        delta_vertical = ground_level - self.source_location.source_location_z[source_nbr]
         # Horizontal and vertical standard deviations. i.e. horizontal and vertical wind sigmas.
         sigma_vertical = self.vertical_stddev(downwind = delta_R, a_vertical = None, b_vertical = None, tanV = None, estimated = False, scheme="Draxler")
         sigma_horizontal = self.horizontal_stddev(downwind = delta_R, a_horizontal = None, b_horizontal = None, tanH = None, estimated = False, scheme="Draxler")
@@ -969,13 +983,15 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
 
         # Atmospheric boundary layer height, source height.
         max_abl = self.atmospheric_state.max_abl
-        height = self.source_location.source_location_z
+        # height = self.source_location.source_location_z
 
-        return windspeeds, winddirection, temporal_sensor_x, temporal_sensor_y, max_abl, height, temporal_sensor_z
+        # return windspeeds, winddirection, temporal_sensor_x, temporal_sensor_y, max_abl, height, temporal_sensor_z
+        return windspeeds, winddirection, temporal_sensor_x, temporal_sensor_y, max_abl, temporal_sensor_z
 
 
 
-    def temporal_gridfree_coupling_matrix(self, fixed, x_coord = None, y_coord = None, a_horizontal = None, a_vertical = None, b_horizontal = None, b_vertical = None, simulation = True, estimated = False, scheme = "Draxler", stability_class = "B"):
+    # def temporal_gridfree_coupling_matrix(self, fixed, x_coord = None, y_coord = None, a_horizontal = None, a_vertical = None, b_horizontal = None, b_vertical = None, simulation = True, estimated = False, scheme = "Draxler", stability_class = "B"):
+    def temporal_gridfree_coupling_matrix(self, fixed, x_coord = None, y_coord = None, z_coord = None, a_horizontal = None, a_vertical = None, b_horizontal = None, b_vertical = None, simulation = True, estimated = False, scheme = "Draxler", stability_class = "B"):
         """
         Computes the temporal coupling matrix for grid-free inversion using the Gaussian plume model.
 
@@ -983,6 +999,7 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
             fixed : Output from fixed_objects_of_gridfree_coupling_matrix().
             x_coord (Array[float]): Source x locations in meters.
             y_coord (Array[float]): Source y locations in meters.
+            z_coord (Array[float]): Source z locations in meters.
             a_horizontal (Array[float]): Horizontal dispersion parameter.
             a_vertical (Array[float]): Vertical dispersion parameter.
             b_horizontal (Array[float]): Horizontal dispersion parameter.
@@ -1000,6 +1017,8 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
             x_coord = self.source_location.source_location_x
         if y_coord is None:
             y_coord = self.source_location.source_location_y
+        if z_coord is None:
+            z_coord = self.source_location.source_location_z
         if a_horizontal is None:
             a_horizontal = self.atmospheric_state.a_horizontal
         if a_vertical is None:
@@ -1016,11 +1035,16 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
         # Extracting fixed objects.
         windspeeds, winddirection = fixed[0], fixed[1]
         temporal_sensor_x, temporal_sensor_y = fixed[2], fixed[3]
-        max_abl, height = fixed[4], fixed[5]
-        temporal_sensor_z = fixed[6]
+        # max_abl, height = fixed[4], fixed[5]
+        max_abl = fixed[4]
+        height = z_coord[0]
+        temporal_sensor_z = fixed[5]
 
         # Source locations.
-        s = jnp.array([x_coord, y_coord, jnp.full(len(x_coord), self.source_location.source_location_z)]).reshape(3,len(x_coord))
+        if z_coord is None:
+            s = jnp.array([x_coord, y_coord, jnp.full(len(x_coord), self.source_location.source_location_z)]).reshape(3,len(x_coord))
+        else:
+            s = jnp.array([x_coord, y_coord, z_coord]).reshape(3,len(x_coord))
 
         # Downwind distances, horizontal and vertical offsets.
         delta_R = self.downwind_distance(s, temporal_sensor_x, temporal_sensor_y, winddirection)
