@@ -390,11 +390,11 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
 
         """
 
-        [time_varying_array, sigma, mean] = parameters
-        drift = self.wind_field.wind_temporal_correlation * (mean - time_varying_array) * self.wind_field.time_step 
+        [time_varying_array, sigma, mean, iterations] = parameters
+        drift = self.wind_field.wind_temporal_correlation * (mean[iterations] - time_varying_array) * self.wind_field.time_step 
         diffusion = sigma * jnp.sqrt(self.wind_field.time_step) * jax.random.normal(key)
         time_varying_array = time_varying_array + drift + diffusion
-        parameters = [time_varying_array, sigma, mean]
+        parameters = [time_varying_array, sigma, mean, iterations+1]
         
         return parameters, parameters
 
@@ -410,16 +410,16 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
         """
 
         key = jax.random.PRNGKey(self.wind_field.wind_speed_seed)
-        initial_value, mean = self.wind_field.initial_wind_speed, self.wind_field.initial_wind_speed
+        initial_value, mean = self.wind_field.initial_wind_speed, np.repeat(self.wind_field.initial_wind_speed, self.wind_field.number_of_time_steps)
         std = self.wind_field.wind_speed_temporal_std
-        _, wind_speed = jax.lax.scan(self.generate_ornstein_u_process, [initial_value, std, mean], jax.random.split(key, self.wind_field.number_of_time_steps))
+        _, wind_speed = jax.lax.scan(self.generate_ornstein_u_process, [initial_value, std, mean,0], jax.random.split(key, self.wind_field.number_of_time_steps))
         wind_speed = jnp.where(wind_speed[0] < 1.0, 1.0, wind_speed[0])
         
         return wind_speed
 
 
 
-    def wind_direction(self):
+    def wind_direction(self, constant_mean=True, num_periods=1):
         """
         Uses the WindField class to generate time varying wind directions.
 
@@ -435,11 +435,19 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
         # Wind directions change according to an OU process.
         else:
             key = jax.random.PRNGKey(self.wind_field.wind_direction_seed)
-            initial_value, mean = self.wind_field.initial_wind_direction, self.wind_field.initial_wind_direction
+            initial_value, mean = self.wind_field.initial_wind_direction, np.repeat(self.wind_field.initial_wind_direction, self.wind_field.number_of_time_steps)
             std = self.wind_field.wind_direction_temporal_std
-            _, wind_d = jax.lax.scan(self.generate_ornstein_u_process, [initial_value, std, mean], jax.random.split(key, self.wind_field.number_of_time_steps))
-            wind_direction = wind_d[0]
-            
+            iteration = 0
+            if constant_mean == True:
+                _, wind_d = jax.lax.scan(self.generate_ornstein_u_process, [initial_value, std, mean, iteration], jax.random.split(key, self.wind_field.number_of_time_steps))
+                wind_direction = wind_d[0]
+            elif constant_mean == False:
+                x = np.linspace(0, num_periods * 2 * np.pi, self.wind_field.number_of_time_steps)
+                y = np.sin(x)
+                mean = self.wind_field.initial_wind_direction + (self.wind_field.end_wind_direction - self.wind_field.initial_wind_direction) * (y - np.min(y)) / (np.max(y) - np.min(y))
+                _, wind_d = jax.lax.scan(self.generate_ornstein_u_process, [initial_value, std, mean, iteration], jax.random.split(key, self.wind_field.number_of_time_steps))
+                wind_direction = wind_d[0]
+                            
         return wind_direction
     
 
@@ -825,7 +833,7 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
     
 
 
-    def fixed_objects_of_grided_coupling_matrix(self, wind_speed = None, wind_direction = None, number_of_time_steps = None):
+    def fixed_objects_of_grided_coupling_matrix(self, wind_speed = None, wind_direction = None, number_of_time_steps = None, constant_mean = True):
         """ 
         Returns the fixed objects for the temporal coupling matrix for grid-based inversion using the Gaussian plume model.
         Avoids having to recompute them. These are not dependent on parameters being estimated.
@@ -855,7 +863,7 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
         else:
             windspeeds = wind_speed
         if wind_direction is None:
-            winddirection = jnp.tile(self.wind_direction(), len(self.sensors_settings.sensor_locations)).reshape(-1,1)
+            winddirection = jnp.tile(self.wind_direction(constant_mean), len(self.sensors_settings.sensor_locations)).reshape(-1,1)
         else:
             winddirection = wind_direction
         
@@ -945,7 +953,7 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
 
 
 
-    def fixed_objects_of_gridfree_coupling_matrix(self, wind_speed = None, wind_direction = None, number_of_time_steps = None):
+    def fixed_objects_of_gridfree_coupling_matrix(self, wind_speed = None, wind_direction = None, number_of_time_steps = None, constant_mean = True):
         """ 
         Returns the fixed objects for the temporal coupling matrix for grid-free inversion using the Gaussian plume model.
         Avoids having to recompute them. These are not dependent on parameters being estimated.
@@ -967,9 +975,12 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
         else:
             windspeeds = wind_speed
         if wind_direction is None:
-            winddirection = jnp.tile(self.wind_direction(), len(self.sensors_settings.sensor_locations)).reshape(-1,1)
+            winddirection = jnp.tile(self.wind_direction(constant_mean), len(self.sensors_settings.sensor_locations)).reshape(-1,1)
         else:
-            winddirection = wind_direction
+            if wind_direction.shape[0] == len(self.sensors_settings.sensor_locations)*self.wind_field.number_of_time_steps:
+                winddirection = wind_direction
+            else:
+                winddirection = jnp.tile(wind_direction, len(self.sensors_settings.sensor_locations)).reshape(-1,1)
 
         # Temporal sensor locations.
         if number_of_time_steps is None:
@@ -990,7 +1001,6 @@ class GaussianPlume(Grid, SourceLocation, WindField, AtmosphericState, SensorsSe
 
 
 
-    # def temporal_gridfree_coupling_matrix(self, fixed, x_coord = None, y_coord = None, a_horizontal = None, a_vertical = None, b_horizontal = None, b_vertical = None, simulation = True, estimated = False, scheme = "Draxler", stability_class = "B"):
     def temporal_gridfree_coupling_matrix(self, fixed, x_coord = None, y_coord = None, z_coord = None, a_horizontal = None, a_vertical = None, b_horizontal = None, b_vertical = None, simulation = True, estimated = False, scheme = "Draxler", stability_class = "B"):
         """
         Computes the temporal coupling matrix for grid-free inversion using the Gaussian plume model.
@@ -1631,7 +1641,7 @@ class Sensors(GaussianPlume, BackgroundGas, SensorsSettings):
 
 
 
-    def temporal_sensors_measurements(self, grided = False, beam = True):
+    def temporal_sensors_measurements(self, grided = False, beam = True,  specified_wind_direction=None, varying_emission_rate=False, constant_mean=True):
         """
         Creates the temporal sensor measurements vector using the Gaussian plume model, background gas concentration, and measurement errors.
 
@@ -1651,7 +1661,10 @@ class Sensors(GaussianPlume, BackgroundGas, SensorsSettings):
         if grided == False:
             # Point sensors.
             if beam == False:
-                fixed = self.gaussianplume.fixed_objects_of_gridfree_coupling_matrix()
+                if specified_wind_direction is None:
+                    fixed = self.gaussianplume.fixed_objects_of_gridfree_coupling_matrix(wind_speed = None, wind_direction = None, number_of_time_steps = None, constant_mean = constant_mean)
+                else:
+                    fixed = self.gaussianplume.fixed_objects_of_gridfree_coupling_matrix(wind_speed = None, wind_direction = jnp.tile(specified_wind_direction, len(self.sensors_settings.sensor_locations)).reshape(-1,1), number_of_time_steps = None, constant_mean = constant_mean)
                 A = self.gaussianplume.temporal_gridfree_coupling_matrix(fixed)
                 source_rate = self.gaussianplume.atmospheric_state.emission_rate
                 background_concentration = np.repeat(self.background_vector(chilbolton=False)[0], self.gaussianplume.wind_field.number_of_time_steps).reshape(-1,1) 
@@ -1738,8 +1751,10 @@ class Sensors(GaussianPlume, BackgroundGas, SensorsSettings):
             source_rate = self.source_rate()
             background_concentration = np.repeat(self.background_vector(chilbolton=False)[0], self.gaussianplume.wind_field.number_of_time_steps).reshape(-1,1)
             measurement_errors = self.measurement_errors().reshape(-1,1)
-        
-        sensors_measurements =  np.matmul(A, source_rate.reshape(-1,1)) + background_concentration + measurement_errors  
+        if varying_emission_rate == False:
+            sensors_measurements =  np.matmul(A, source_rate.reshape(-1,1)) + background_concentration + measurement_errors
+        elif varying_emission_rate == True:
+            sensors_measurements =  (A.flatten() * jnp.tile(source_rate,36)).reshape(-1,1) + background_concentration + measurement_errors  
         
         return sensors_measurements.reshape(-1,1), A, source_rate, measurement_errors, background_concentration
 
